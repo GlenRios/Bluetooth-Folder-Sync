@@ -7,8 +7,8 @@ from watchdog.events import FileSystemEventHandler
 import hashlib
 
 # Configuración
-peer_addr = "DC:F5:05:A6:3C:C0"
-local_addr = "18:CC:18:B7:0B:2D"
+local_addr = "DC:F5:05:A6:3C:C0"
+peer_addr = "18:CC:18:B7:0B:2D"
 port = 30
 sync_folder = "./sync_folder"  # Ruta de la carpeta a sincronizar
 
@@ -41,6 +41,13 @@ class SyncHandler(FileSystemEventHandler):
             print(f"Detectada eliminación de carpeta: {event.src_path}")
             self.send_func(event.src_path, "rmdir")
 
+    def on_moved(self, event):
+        if event.is_directory:
+            print(f"Detectado cambio de nombre de carpeta: {event.src_path} -> {event.dest_path}")
+        else:
+            print(f"Detectado cambio de nombre de archivo: {event.src_path} -> {event.dest_path}")
+        self.send_func((event.src_path, event.dest_path), "rename")
+
 def start_server(local_addr, port):
     """Servidor para recibir archivos y sincronización"""
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
@@ -60,6 +67,19 @@ def start_server(local_addr, port):
             elif len(parts) == 3:
                 command, filepath, content = parts
                 file_hash = None
+            elif len(parts) == 2 and parts[0] == "rename":
+                command, paths = parts
+                src_path, dest_path = paths.split("|")
+                file_path_src = os.path.join(sync_folder, src_path)
+                file_path_dest = os.path.join(sync_folder, dest_path)
+
+                if os.path.exists(file_path_src):
+                    os.rename(file_path_src, file_path_dest)
+                    print(f"Renombrado: {file_path_src} -> {file_path_dest}")
+                else:
+                    print(f"Archivo o carpeta no encontrada para renombrar: {file_path_src}")
+                client_sock.close()
+                continue
             else:
                 print(f"Formato de mensaje inválido: {data}")
                 client_sock.close()
@@ -105,18 +125,24 @@ def send_file(file_path, action):
         with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM) as sock:
             sock.connect((peer_addr, port))
 
-            relative_path = os.path.relpath(file_path, sync_folder)
-            if action == "sync":
-                with open(file_path, "rb") as f:
-                    content = f.read().decode()
-                file_hash = calculate_hash(file_path)
-                message = f"sync::{relative_path}::{content}::{file_hash}"
-            elif action == "delete":
-                message = f"delete::{relative_path}::"
-            elif action == "mkdir":
-                message = f"mkdir::{relative_path}::"
-            elif action == "rmdir":
-                message = f"rmdir::{relative_path}::"
+            if action == "rename":
+                src_path, dest_path = file_path
+                relative_src = os.path.relpath(src_path, sync_folder)
+                relative_dest = os.path.relpath(dest_path, sync_folder)
+                message = f"rename::{relative_src}|{relative_dest}"
+            else:
+                relative_path = os.path.relpath(file_path, sync_folder)
+                if action == "sync":
+                    with open(file_path, "rb") as f:
+                        content = f.read().decode()
+                    file_hash = calculate_hash(file_path)
+                    message = f"sync::{relative_path}::{content}::{file_hash}"
+                elif action == "delete":
+                    message = f"delete::{relative_path}::"
+                elif action == "mkdir":
+                    message = f"mkdir::{relative_path}::"
+                elif action == "rmdir":
+                    message = f"rmdir::{relative_path}::"
 
             sock.send(message.encode())
             print(f"Archivo enviado: {file_path} con acción {action}")
