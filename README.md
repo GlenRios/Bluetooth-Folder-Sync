@@ -1,7 +1,7 @@
 # Bluetooth Folder Synchronization
 
 ## Contexto del Problema
-En la era de la conectividad, compartir y sincronizar archivos entre dispositivos es una necesidad común. Aunque existen múltiples soluciones basadas en internet, algunas situaciones requieren métodos de transferencia sin red, como Bluetooth. Este proyecto aborda el problema de sincronizar carpetas entre dos computadoras utilizando Bluetooth, permitiendo que cualquier cambio en una carpeta se refleje automáticamente en la otra.
+Este proyecto aborda el problema de sincronizar carpetas entre dos computadoras utilizando Bluetooth, permitiendo que cualquier cambio en una carpeta se refleje automáticamente en la otra.
 
 ## Solución
 La solución implementa un servicio de sincronización basado en:

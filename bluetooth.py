@@ -7,8 +7,8 @@ from watchdog.events import FileSystemEventHandler
 import hashlib
 
 # Configuración
-local_addr = "DC:F5:05:A6:3C:C0"
-peer_addr = "18:CC:18:B7:0B:2D"
+peer_addr = "DC:F5:05:A6:3C:C0"
+local_addr = "18:CC:18:B7:0B:2D"
 port = 30
 sync_folder = "./sync_folder"  # Ruta de la carpeta a sincronizar
 
@@ -28,12 +28,18 @@ class SyncHandler(FileSystemEventHandler):
         self.send_func = send_func
 
     def on_any_event(self, event):
-        if event.event_type in ["created", "modified"]:
+        if event.event_type == "created" and event.is_directory:
+            print(f"Detectada creación de carpeta: {event.src_path}")
+            self.send_func(event.src_path, "mkdir")
+        if event.event_type in ["created", "modified"] and not event.is_directory:
             print(f"Detectado cambio: {event.src_path}")
             self.send_func(event.src_path, "sync")
-        elif event.event_type == "deleted":
+        if event.event_type == "deleted" and not event.is_directory:
             print(f"Detectada eliminación: {event.src_path}")
             self.send_func(event.src_path, "delete")
+        if event.event_type == "deleted" and event.is_directory:
+            print(f"Detectada eliminación de carpeta: {event.src_path}")
+            self.send_func(event.src_path, "rmdir")
 
 def start_server(local_addr, port):
     """Servidor para recibir archivos y sincronización"""
@@ -78,6 +84,17 @@ def start_server(local_addr, port):
                 else:
                     print(f"Archivo no encontrado para eliminar: {file_path}")
 
+            elif command == "mkdir":
+                os.makedirs(file_path, exist_ok=True)
+                print(f"Carpeta creada: {file_path}")
+
+            elif command == "rmdir":
+                if os.path.exists(file_path) and os.path.isdir(file_path):
+                    os.rmdir(file_path)
+                    print(f"Carpeta eliminada: {file_path}")
+                else:
+                    print(f"Carpeta no encontrada o no vacía para eliminar: {file_path}")
+
             client_sock.close()
         except Exception as e:
             print(f"Error en el servidor: {e}")
@@ -96,9 +113,15 @@ def send_file(file_path, action):
                 message = f"sync::{relative_path}::{content}::{file_hash}"
             elif action == "delete":
                 message = f"delete::{relative_path}::"
+            elif action == "mkdir":
+                message = f"mkdir::{relative_path}::"
+            elif action == "rmdir":
+                message = f"rmdir::{relative_path}::"
 
             sock.send(message.encode())
             print(f"Archivo enviado: {file_path} con acción {action}")
+    except ConnectionResetError:
+        print(f"Error: Conexión reiniciada por el servidor mientras se enviaba {file_path}")
     except Exception as e:
         print(f"Error al enviar archivo: {e}")
 
