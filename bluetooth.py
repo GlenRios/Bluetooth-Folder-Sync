@@ -5,6 +5,7 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import hashlib
+import base64
 
 # Configuración
 local_addr = "DC:F5:05:A6:3C:C0"
@@ -32,8 +33,13 @@ class SyncHandler(FileSystemEventHandler):
             print(f"Detectada creación de carpeta: {event.src_path}")
             self.send_func(event.src_path, "mkdir")
         if event.event_type in ["created", "modified"] and not event.is_directory:
-            print(f"Detectado cambio: {event.src_path}")
-            self.send_func(event.src_path, "sync")
+            file_extension = os.path.splitext(event.src_path)[1].lower()
+            if file_extension in [".jpg", ".jpeg", ".png", ".gif", ".bmp"]:  # Extensiones de imagen
+                print(f"Detectada imagen: {event.src_path}")
+                self.send_func(event.src_path, "image")
+            else:
+                print(f"Detectado cambio: {event.src_path}")
+                self.send_func(event.src_path, "sync")
         if event.event_type == "deleted" and not event.is_directory:
             print(f"Detectada eliminación: {event.src_path}")
             self.send_func(event.src_path, "delete")
@@ -115,6 +121,35 @@ def start_server(local_addr, port):
                 else:
                     print(f"Carpeta no encontrada o no vacía para eliminar: {file_path}")
 
+            elif command == "image":
+                try:
+                    # Crear ruta si no existe
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                    # Leer tamaño de datos codificados
+                    total_size = int(parts[3])
+                    received_data = ""
+
+                    # Recibir datos base64 en bloques
+                    while len(received_data) < total_size:
+                        chunk = client_sock.recv(4096).decode("utf-8")
+                        received_data += chunk
+
+                    # Decodificar contenido base64 a binario
+                    binary_content = base64.b64decode(received_data)
+
+                    # Escribir contenido en el archivo
+                    with open(file_path, "wb") as f:
+                        f.write(binary_content)
+
+                    # Confirmar recepción
+                    client_sock.send("OK".encode("utf-8"))
+                    print(f"Imagen recibida y guardada correctamente: {file_path}")
+                except Exception as e:
+                    print(f"Error al procesar imagen: {e}")
+                    client_sock.send("ERROR".encode("utf-8"))
+
+        
             client_sock.close()
         except Exception as e:
             print(f"Error en el servidor: {e}")
@@ -143,6 +178,33 @@ def send_file(file_path, action):
                     message = f"mkdir::{relative_path}::"
                 elif action == "rmdir":
                     message = f"rmdir::{relative_path}::"
+                elif action == "image":
+                    # Leer archivo en binario y codificar en base64
+                    with open(file_path, "rb") as f:
+                        binary_content = f.read()
+                    base64_content = base64.b64encode(binary_content).decode("utf-8")
+
+                    # Calcular hash y construir encabezado
+                    file_hash = calculate_hash(file_path)
+                    relative_path = os.path.relpath(file_path, sync_folder)
+                    header = f"image::{relative_path}::{file_hash}::{len(base64_content)}".encode("utf-8")
+
+                    # Enviar encabezado
+                    sock.send(header.ljust(1024))  # Aseguramos tamaño fijo de encabezado
+
+                    # Enviar contenido en bloques
+                    chunk_size = 4096
+                    for i in range(0, len(base64_content), chunk_size):
+                        chunk = base64_content[i:i + chunk_size].encode("utf-8")
+                        sock.send(chunk)
+
+                    # Esperar confirmación
+                    confirmation = sock.recv(1024).decode("utf-8")
+                    if confirmation == "OK":
+                        print(f"Imagen enviada correctamente: {file_path}")
+                    else:
+                        print(f"Error en la confirmación del servidor al enviar la imagen: {file_path}")
+             
 
             sock.send(message.encode())
             print(f"Archivo enviado: {file_path} con acción {action}")
